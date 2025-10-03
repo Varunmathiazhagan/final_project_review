@@ -10,6 +10,7 @@ aiohttp>=3.9
 
 # HTML parsing
 beautifulsoup4>=4.12
+lxml>=5.3
 
 # Report generation (optional, used for PDF export in app.py)
 reportlab>=4.0

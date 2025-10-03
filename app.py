@@ -15,9 +15,17 @@ Usage:
     
 """
 
-import asyncio, aiohttp, argparse, json, csv, random, re, time, glob, os, difflib
+import asyncio, aiohttp, argparse, json, csv, random, re, time, glob, os, difflib, warnings
 from urllib.parse import urlparse, urljoin, parse_qs
 from urllib import robotparser
+
+# Suppress BeautifulSoup warning when XML is parsed as HTML; we'll also try to
+# detect XML documents and switch parser accordingly in extraction logic.
+try:
+    from bs4 import XMLParsedAsHTMLWarning  # type: ignore
+    warnings.filterwarnings("ignore", category=XMLParsedAsHTMLWarning)
+except Exception:
+    pass
 
 # -------------------------
 # Config
@@ -232,22 +240,33 @@ class AsyncSQLiScanner:
             try:
                 async with self.semaphore:
                     if method.upper() == "GET":
-                        async with session.get(url, headers=headers, params=(data or None), timeout=self.timeout) as resp:
+                        async with session.get(url, headers=headers, params=(data or None), timeout=aiohttp.ClientTimeout(total=self.timeout)) as resp:
                             text = await resp.text()
                             # retry on 429 or 5xx
                             if resp.status in (429,) or 500 <= resp.status < 600:
                                 raise aiohttp.ClientResponseError(request_info=resp.request_info, history=resp.history, status=resp.status, message="retryable status")
                             return resp.status, text
                     else:
-                        async with session.post(url, headers=headers, data=data, timeout=self.timeout) as resp:
+                        async with session.post(url, headers=headers, data=data, timeout=aiohttp.ClientTimeout(total=self.timeout)) as resp:
                             text = await resp.text()
                             if resp.status in (429,) or 500 <= resp.status < 600:
                                 raise aiohttp.ClientResponseError(request_info=resp.request_info, history=resp.history, status=resp.status, message="retryable status")
                             return resp.status, text
+            except (asyncio.TimeoutError, aiohttp.ServerTimeoutError):
+                if attempt >= self.max_retries:
+                    return None, ""
+                sleep_for = self.backoff_base * (2 ** attempt) + random.uniform(0, 0.2)
+                await asyncio.sleep(sleep_for)
+                attempt += 1
+            except (aiohttp.ClientError, aiohttp.ClientResponseError):
+                if attempt >= self.max_retries:
+                    return None, ""
+                sleep_for = self.backoff_base * (2 ** attempt) + random.uniform(0, 0.2)
+                await asyncio.sleep(sleep_for)
+                attempt += 1
             except Exception:
                 if attempt >= self.max_retries:
                     return None, ""
-                # exponential backoff with jitter
                 sleep_for = self.backoff_base * (2 ** attempt) + random.uniform(0, 0.2)
                 await asyncio.sleep(sleep_for)
                 attempt += 1
@@ -321,7 +340,25 @@ class AsyncSQLiScanner:
 
     async def extract_links_forms(self, session, html, base_url, depth):
         from bs4 import BeautifulSoup
-        soup = BeautifulSoup(html, "html.parser")
+        # Choose parser based on quick XML sniff to avoid XMLParsedAsHTMLWarning
+        parser = "html.parser"
+        try:
+            s = (html or "").lstrip()
+            if s.startswith("<?xml") or re.match(r'^<\s*(rss|feed|sitemapindex|urlset)\b', s, re.I):
+                # Use lxml for XML if available, fallback to html.parser
+                try:
+                    import lxml
+                    parser = "lxml-xml"
+                except ImportError:
+                    parser = "xml"
+        except Exception:
+            pass
+        
+        try:
+            soup = BeautifulSoup(html, parser)
+        except Exception:
+            # Fallback to html.parser if lxml-xml fails
+            soup = BeautifulSoup(html, "html.parser")
         # A tags
         for a in soup.find_all('a', href=True):
             href = a['href']
