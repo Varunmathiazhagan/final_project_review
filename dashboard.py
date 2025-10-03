@@ -5,20 +5,24 @@ A tiny Flask dashboard to run scans and visualize results.
 - POST /scan -> trigger a new scan (async) against a configured URL
 
 Usage:
-  set START_URL (env var) or edit the DEFAULT_START_URL below
-  python dashboard.py
+  Users can enter ANY website URL directly in the dashboard UI
+  No environment variables required - fully configurable through web interface
 """
 import os, json, threading, asyncio, csv, time, re
 from datetime import datetime
 from flask import Flask, request, redirect, url_for, render_template_string, jsonify
+from flask_cors import CORS
 import aiohttp  # Add this near other imports
 
 # Import scanner from app.py
 from app import AsyncSQLiScanner
 
-DEFAULT_START_URL = os.environ.get("START_URL", "http://localhost:8000")
+# Default URL is just a placeholder - users can enter any URL in the UI
+DEFAULT_START_URL = os.environ.get("START_URL", "")
 
 app = Flask(__name__)
+# Enable CORS for API endpoints
+CORS(app, resources={r"/api/*": {"origins": "*"}})
 
 # Global scan status and a dedicated asyncio loop in a worker thread
 scan_in_progress = False
@@ -161,11 +165,18 @@ TEMPLATE = """
     </div>
     <div class="card">
       <form id="scanForm" method="post" action="/scan">
-        <label>Start URL</label>
-        <input type="text" name="start_url" value="{{ start_url }}">
+        <label style="display:block; margin-bottom:8px; font-weight:600">Target URL</label>
+        <input type="text" name="start_url" value="{{ start_url }}" placeholder="https://example.com" style="width:100%; max-width:600px">
         <button class="btn" id="scanBtn" type="submit" {% if scan_in_progress %}style="display:none"{% endif %}>Run Scan</button>
       </form>
-      <p>Tip: Start the PHP app first. Default is <code>{{ start_url }}</code>.</p>
+      <p style="margin-top:12px; color:#8b9dc3; font-size:14px">
+        ⚠️ <strong>Legal Notice:</strong> Only scan websites you own or have explicit permission to test. 
+        Unauthorized scanning may be illegal in your jurisdiction.
+      </p>
+      <p style="color:#8b9dc3; font-size:13px; margin-top:6px">
+        💡 <strong>Tip:</strong> Enter any URL above (e.g., http://testphp.vulnweb.com for testing). 
+        Start with low depth and concurrency for best results.
+      </p>
       <div style="margin-top:8px; display:flex; gap:16px; align-items:center">
         <label><input type="checkbox" id="colorToggle"> Show severity colors</label>
         <label><input type="checkbox" id="codeToggle"> Show secure query snippet</label>
@@ -184,6 +195,7 @@ TEMPLATE = """
           <label>Time Threshold (s)<br><input type="number" id="ctlTimeThreshold" step="0.5" min="1" value="2"></label>
           <label><input type="checkbox" id="ctlParamFuzz"> Param Fuzzing</label>
           <label>Crawler UA<br><input type="text" id="ctlUA" placeholder="e.g., MyScanner/1.0"></label>
+          <label><input type="checkbox" id="ctlJSRender" checked> JS rendering</label>
         </div>
       </div>
     </div>
@@ -323,6 +335,7 @@ TEMPLATE = """
           time_threshold: parseFloat(document.getElementById('ctlTimeThreshold')?.value || '2'),
           param_fuzz: !!document.getElementById('ctlParamFuzz')?.checked,
           crawler_ua: (document.getElementById('ctlUA')?.value || '').trim() || null,
+          js_render: !!document.getElementById('ctlJSRender')?.checked,
         };
         // Immediately clear previous results in the UI
         try{
@@ -428,13 +441,15 @@ def load_latest():
 def index():
   results, mtime = load_latest()
   enriched = [_enrich_result(r) for r in results]
+  # Use empty string as default so user must enter a URL
+  default_url = DEFAULT_START_URL if DEFAULT_START_URL else ""
   return render_template_string(
     TEMPLATE,
     results=enriched,
     count=len(enriched),
     updated=(mtime.isoformat() if mtime else None),
     scan_in_progress=bool(scan_in_progress),
-    start_url=DEFAULT_START_URL,
+    start_url=default_url,
   )
 
 
@@ -442,7 +457,16 @@ def index():
 @app.route("/scan", methods=["POST"]) 
 def scan_form_post():
   payload = request.form or {}
-  start_url = payload.get('start_url') or DEFAULT_START_URL
+  start_url = payload.get('start_url', '').strip()
+  
+  # Validate URL is provided
+  if not start_url:
+    return "Error: Please enter a target URL", 400
+  
+  # Add http:// if no protocol specified
+  if not start_url.startswith(('http://', 'https://')):
+    start_url = 'http://' + start_url
+  
   if scan_in_progress:
     return redirect(url_for('index'))
   options = {
@@ -456,6 +480,7 @@ def scan_form_post():
     'time_threshold': 2.0,
     'param_fuzz': False,
     'crawler_ua': None,
+    'js_render': True,
   }
   run_scan(start_url, options)
   return redirect(url_for('index'))
@@ -574,7 +599,16 @@ def api_scan():
   if request.method == 'OPTIONS':
     return ('', 204)
   payload = request.get_json(silent=True) or {}
-  start_url = payload.get('start_url') or request.form.get('start_url') or DEFAULT_START_URL
+  start_url = payload.get('start_url') or request.form.get('start_url', '').strip()
+  
+  # Validate URL is provided
+  if not start_url:
+    return jsonify({"started": False, "error": "Please provide a target URL"}), 400
+  
+  # Add http:// if no protocol specified
+  if not start_url.startswith(('http://', 'https://')):
+    start_url = 'http://' + start_url
+  
   global scan_in_progress
   if scan_in_progress:
     return jsonify({"started": False, "reason": "Scan already in progress"}), 429
@@ -589,6 +623,7 @@ def api_scan():
   'time_threshold': payload.get('time_threshold', 2.0),
   'param_fuzz': payload.get('param_fuzz', False),
   'crawler_ua': payload.get('crawler_ua') or None,
+  'js_render': payload.get('js_render', True),
   }
   run_scan(start_url, options)
   return jsonify({"started": True, "start_url": start_url})
@@ -628,6 +663,15 @@ def sse_events():
     }
   )
 
+
+@app.route("/health", methods=["GET"])
+def health_check():
+    """Health check endpoint for monitoring services like Render"""
+    return jsonify({
+        "status": "healthy",
+        "service": "sql-scanner-dashboard",
+        "timestamp": datetime.now().isoformat()
+    }), 200
 
 @app.route("/api/status", methods=["GET"]) 
 def api_status():
@@ -715,4 +759,6 @@ def api_summary():
 
 if __name__ == "__main__":
   # Disable reloader to avoid spawning multiple worker threads/SSE generators
-  app.run(host="127.0.0.1", port=5050, debug=True, use_reloader=False)
+  port = int(os.environ.get("PORT", 5050))
+  debug = os.environ.get("FLASK_ENV") != "production"
+  app.run(host="0.0.0.0", port=port, debug=debug, use_reloader=False)

@@ -12,7 +12,7 @@ Features:
 - JSON, CSV, and latest_scan.json output
 
 Usage:
-    python app.py --start-url http://localhost:8000 --max-depth 2 --concurrency 10
+    
 """
 
 import asyncio, aiohttp, argparse, json, csv, random, re, time, glob, os, difflib
