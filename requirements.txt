@@ -2,6 +2,9 @@
 Flask>=2.2
 Flask-Cors>=4.0
 
+# Streamlit UI
+streamlit>=1.36
+
 # Async HTTP client
 aiohttp>=3.9
 
