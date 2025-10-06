@@ -1,0 +1,44 @@
+[server]
+# Prevent the app from going to sleep on Streamlit Cloud
+# This helps with automatic restarts and session management
+headless = true
+port = 8501
+enableCORS = false
+enableXsrfProtection = true
+
+# Keep websocket connection alive
+maxUploadSize = 200
+enableWebsocketCompression = true
+
+[browser]
+# Automatically gather usage stats (helps keep app warm)
+gatherUsageStats = true
+
+# Server address - leave empty for Streamlit Cloud
+serverAddress = ""
+
+[theme]
+# Optional: You can customize your app theme here
+# primaryColor = "#FF4B4B"
+# backgroundColor = "#FFFFFF"
+# secondaryBackgroundColor = "#F0F2F6"
+# textColor = "#262730"
+# font = "sans serif"
+
+[client]
+# Show error details
+showErrorDetails = true
+
+# Toolbar mode
+toolbarMode = "auto"
+
+[runner]
+# Automatically rerun when files change (local development)
+# Set to false for production to save resources
+fastReruns = true
+
+# Fix for Streamlit freezing issues
+magicEnabled = true
+
+# Enforce serial script execution to prevent race conditions
+enforceSerialRerun = true

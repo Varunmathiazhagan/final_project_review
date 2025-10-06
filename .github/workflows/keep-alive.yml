@@ -1,0 +1,36 @@
+name: Keep Streamlit App Alive
+
+on:
+  schedule:
+    # Runs every 6 hours to prevent app from sleeping
+    # Adjust timing as needed (cron format: minute hour day month weekday)
+    - cron: '0 */6 * * *'
+  
+  # Allow manual triggering from GitHub Actions tab
+  workflow_dispatch:
+
+jobs:
+  wake-app:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Ping Streamlit App
+        run: |
+          echo "Pinging Streamlit app to keep it alive..."
+          # Replace YOUR_APP_URL with your actual Streamlit Cloud URL
+          # Example: https://sqlvulnerabilitydector.streamlit.app
+          response=$(curl -s -o /dev/null -w "%{http_code}" https://YOUR_APP_URL.streamlit.app || echo "000")
+          
+          if [ "$response" -eq "000" ]; then
+            echo "⚠️ Warning: Could not reach the app. Please check the URL."
+            exit 0
+          elif [ "$response" -eq "200" ] || [ "$response" -eq "301" ] || [ "$response" -eq "302" ]; then
+            echo "✅ App is alive! HTTP Status: $response"
+          else
+            echo "ℹ️ App responded with HTTP Status: $response"
+          fi
+          
+      - name: Log ping time
+        run: |
+          echo "Last ping: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+          echo "This workflow keeps your Streamlit app from going to sleep on free tier."

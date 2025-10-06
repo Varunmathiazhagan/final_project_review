@@ -95,6 +95,27 @@ Your app will be live in 2-5 minutes!
 - **Recommended settings:** Max depth 1-2, concurrency 5-10
 - **Timeout:** Streamlit Cloud may timeout for very long scans (>10 min)
 
+### 🔄 Keeping Your App Active
+
+Streamlit Cloud free tier apps sleep after 7 days of inactivity. To prevent this:
+
+**Option 1: UptimeRobot (Recommended - Free)**
+1. Sign up at [UptimeRobot.com](https://uptimerobot.com)
+2. Add your app URL as a monitor
+3. Set ping interval to 5 minutes
+4. Your app stays awake 24/7!
+
+**Option 2: GitHub Actions (Automated)**
+- The included `.github/workflows/keep-alive.yml` pings your app every 6 hours
+- Edit the file to add your Streamlit app URL
+- Enable GitHub Actions in your repository
+
+**Option 3: Manual Wake-Up**
+- Visit your app at least once per week
+- Click "Wake up" button if it goes to sleep
+
+See `INACTIVITY_SOLUTIONS.md` for detailed troubleshooting.
+
 ## 🖥️ Alternative Deployment (Flask on Render/Railway)
 
 ### Render Deployment
