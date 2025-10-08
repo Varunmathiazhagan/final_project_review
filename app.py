@@ -464,14 +464,106 @@ class AsyncSQLiScanner:
                 return 'Medium'
             return 'Medium'
 
-        def _fix_snippet(param):
-            # Simple PDO-style snippet
-            return (
-                f"// PHP PDO example\n"
-                f"$stmt = $pdo->prepare('SELECT * FROM table WHERE {param} = ?');\n"
-                f"$stmt->execute([$value]);\n"
-                f"$row = $stmt->fetch();\n"
-            )
+        def _fix_snippet(param, technique="", payload=""):
+            """
+            Generate technique-specific remediation code snippets.
+            Returns secure code examples tailored to the detected SQLi type.
+            """
+            tech_lower = (technique or "").lower()
+            
+            # Error-Based SQLi - Focus on input validation and escaping
+            if "error" in tech_lower:
+                return (
+                    f"// Error-Based SQLi Prevention\n"
+                    f"// 1. Use Prepared Statements (Best Practice)\n"
+                    f"$stmt = $pdo->prepare('SELECT * FROM users WHERE {param} = :value');\n"
+                    f"$stmt->execute([':value' => $userInput]);\n"
+                    f"$result = $stmt->fetchAll();\n\n"
+                    f"// 2. Disable detailed error messages in production\n"
+                    f"ini_set('display_errors', 0);\n"
+                    f"error_reporting(0);\n\n"
+                    f"// 3. Use custom error handler\n"
+                    f"try {{\n"
+                    f"    $stmt->execute([':value' => $userInput]);\n"
+                    f"}} catch (PDOException $e) {{\n"
+                    f"    // Log error securely, show generic message to user\n"
+                    f"    error_log($e->getMessage());\n"
+                    f"    die('An error occurred. Please try again.');\n"
+                    f"}}\n"
+                )
+            
+            # Boolean-Based Blind SQLi - Emphasize parameterization
+            elif "boolean" in tech_lower:
+                return (
+                    f"// Boolean-Based Blind SQLi Prevention\n"
+                    f"// Use parameterized queries to prevent logic manipulation\n\n"
+                    f"// PHP PDO (Recommended)\n"
+                    f"$stmt = $pdo->prepare('SELECT * FROM products WHERE {param} = ?');\n"
+                    f"$stmt->execute([$userInput]);\n"
+                    f"$data = $stmt->fetchAll();\n\n"
+                    f"// Python (SQLAlchemy)\n"
+                    f"# from sqlalchemy import text\n"
+                    f"# result = db.execute(text('SELECT * FROM products WHERE {param} = :{param}'), {{{param}: user_input}})\n\n"
+                    f"// Node.js (mysql2)\n"
+                    f"// connection.execute('SELECT * FROM products WHERE {param} = ?', [userInput], ...);\n\n"
+                    f"// NEVER concatenate user input:\n"
+                    f"// BAD: $query = \"SELECT * WHERE {param} = '\" . $_GET['{param}'] . \"'\";\n"
+                )
+            
+            # Time-Based Blind SQLi - Add rate limiting
+            elif "time" in tech_lower:
+                return (
+                    f"// Time-Based Blind SQLi Prevention\n"
+                    f"// 1. Parameterized Queries (Essential)\n"
+                    f"$stmt = $pdo->prepare('SELECT * FROM data WHERE {param} = :param');\n"
+                    f"$stmt->execute([':param' => $userInput]);\n\n"
+                    f"// 2. Implement Rate Limiting\n"
+                    f"$redis = new Redis();\n"
+                    f"$key = 'rate_limit:' . $_SERVER['REMOTE_ADDR'];\n"
+                    f"if ($redis->incr($key) > 10) {{\n"
+                    f"    http_response_code(429);\n"
+                    f"    die('Too many requests');\n"
+                    f"}}\n"
+                    f"$redis->expire($key, 60); // 10 requests per minute\n\n"
+                    f"// 3. Set Query Timeout\n"
+                    f"$pdo->setAttribute(PDO::ATTR_TIMEOUT, 5);\n"
+                )
+            
+            # UNION-Based SQLi - Column count and type handling
+            elif "union" in tech_lower:
+                return (
+                    f"// UNION-Based SQLi Prevention\n"
+                    f"// 1. Use Prepared Statements (Prevents UNION injection)\n"
+                    f"$stmt = $pdo->prepare('SELECT id, name, email FROM users WHERE {param} = ?');\n"
+                    f"$stmt->execute([$userInput]);\n"
+                    f"$results = $stmt->fetchAll(PDO::FETCH_ASSOC);\n\n"
+                    f"// 2. Whitelist allowed columns (if dynamic column selection needed)\n"
+                    f"$allowedColumns = ['id', 'name', 'email', 'created_at'];\n"
+                    f"$column = in_array($_GET['sort'], $allowedColumns) ? $_GET['sort'] : 'id';\n"
+                    f"$stmt = $pdo->prepare(\"SELECT * FROM users ORDER BY $column\");\n\n"
+                    f"// 3. Input Validation\n"
+                    f"if (!is_numeric($userInput)) {{\n"
+                    f"    die('Invalid input');\n"
+                    f"}}\n"
+                )
+            
+            # Generic fallback for unknown techniques
+            else:
+                return (
+                    f"// Generic SQLi Prevention for parameter '{param}'\n"
+                    f"// 1. PHP PDO (Prepared Statements)\n"
+                    f"$stmt = $pdo->prepare('SELECT * FROM table WHERE {param} = :value');\n"
+                    f"$stmt->execute([':value' => $userInput]);\n"
+                    f"$row = $stmt->fetch();\n\n"
+                    f"// 2. Python (psycopg2)\n"
+                    f"# cursor.execute('SELECT * FROM table WHERE {param} = %s', (user_input,))\n\n"
+                    f"// 3. ASP.NET (Entity Framework)\n"
+                    f"// var result = context.Table.Where(t => t.{param.capitalize()} == userInput).ToList();\n\n"
+                    f"// 4. Input Validation\n"
+                    f"if (!preg_match('/^[a-zA-Z0-9_-]+$/', $userInput)) {{\n"
+                    f"    die('Invalid input format');\n"
+                    f"}}\n"
+                )
 
         def _score_for(tech: str, evidence: str) -> float:
             t = (tech or '').lower()
@@ -517,7 +609,7 @@ class AsyncSQLiScanner:
             entry = {"url": base_url, "type": base_type, "param": param, "technique": tech, "payload": payload, "evidence": evidence}
             entry["risk"] = _risk_for(tech)
             entry["score"] = _score_for(tech, evidence)
-            entry["fix_snippet"] = _fix_snippet(param)
+            entry["fix_snippet"] = _fix_snippet(param, tech, payload)
             if isinstance(extra, dict):
                 entry.update(extra)
             self.results.append(entry)

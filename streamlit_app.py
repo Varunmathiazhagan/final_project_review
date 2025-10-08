@@ -258,9 +258,10 @@ if submitted:
         for idx, r in enumerate(filtered_results, 1):
             risk = r.get("risk", "Medium")
             risk_emoji = {"Critical": "🔴", "High": "🟠", "Medium": "🟡", "Low": "🟢"}.get(risk, "⚪")
+            technique = r.get('technique', 'Unknown')
             
             with st.expander(
-                f"{risk_emoji} #{idx}: {r.get('technique', 'Unknown')} on `{r.get('param', 'N/A')}` [{risk}]",
+                f"{risk_emoji} #{idx}: {technique} on `{r.get('param', 'N/A')}` [{risk}]",
                 expanded=False
             ):
                 col_detail1, col_detail2 = st.columns([2, 1])
@@ -273,11 +274,85 @@ if submitted:
                     st.markdown(f"**Risk Level:** {risk}")
                     st.markdown(f"**Score:** {r.get('score', 'N/A')}")
                     st.markdown(f"**Type:** {r.get('type', 'GET')}")
+                    st.markdown(f"**Technique:** {technique}")
+                
+                # Show technique-specific explanation
+                st.markdown("---")
+                st.markdown("**📖 Vulnerability Explanation:**")
+                
+                tech_lower = technique.lower()
+                if "error" in tech_lower:
+                    st.info(
+                        "**Error-Based SQLi:** The application reveals database errors containing sensitive "
+                        "information when invalid SQL syntax is injected. Attackers can extract database "
+                        "structure and data by analyzing error messages."
+                    )
+                elif "boolean" in tech_lower:
+                    st.info(
+                        "**Boolean-Based Blind SQLi:** The application responds differently to TRUE vs FALSE "
+                        "SQL conditions, allowing attackers to extract data bit-by-bit by asking yes/no questions "
+                        "to the database through conditional logic."
+                    )
+                elif "time" in tech_lower:
+                    st.info(
+                        "**Time-Based Blind SQLi:** The application can be forced to delay responses using "
+                        "SQL time functions (e.g., SLEEP, WAITFOR). Attackers infer data by measuring response times, "
+                        "extracting information when no visible differences exist in page content."
+                    )
+                elif "union" in tech_lower:
+                    st.info(
+                        "**UNION-Based SQLi:** The application allows injecting additional SELECT statements "
+                        "using UNION operators, enabling direct extraction of data from other tables or columns "
+                        "by combining results with the original query."
+                    )
                 
                 # Show fix snippet
                 fs = r.get("fix_snippet") or "Use parameterized queries to prevent SQLi."
                 st.markdown("**🔧 Remediation (Secure Code Example):**")
                 st.code(fs, language="php")
+                
+                # Add security best practices
+                st.markdown("**✅ Additional Security Best Practices:**")
+                best_practices = []
+                if "error" in tech_lower:
+                    best_practices = [
+                        "Disable detailed error messages in production",
+                        "Implement custom error pages",
+                        "Log errors securely server-side only",
+                        "Use try-catch blocks to handle exceptions gracefully"
+                    ]
+                elif "boolean" in tech_lower:
+                    best_practices = [
+                        "Always use parameterized queries/prepared statements",
+                        "Never concatenate user input into SQL strings",
+                        "Implement strict input validation",
+                        "Use ORM frameworks when possible (e.g., SQLAlchemy, Entity Framework)"
+                    ]
+                elif "time" in tech_lower:
+                    best_practices = [
+                        "Use parameterized queries to prevent injection",
+                        "Implement rate limiting on endpoints",
+                        "Set database query timeouts",
+                        "Monitor for unusual response time patterns"
+                    ]
+                elif "union" in tech_lower:
+                    best_practices = [
+                        "Use parameterized queries exclusively",
+                        "Whitelist allowed column names for dynamic queries",
+                        "Validate and sanitize all user inputs",
+                        "Apply principle of least privilege to database accounts"
+                    ]
+                else:
+                    best_practices = [
+                        "Use parameterized queries/prepared statements",
+                        "Apply input validation and sanitization",
+                        "Follow principle of least privilege",
+                        "Regular security audits and penetration testing"
+                    ]
+                
+                for bp in best_practices:
+                    st.markdown(f"- {bp}")
+
 
         # Downloads (JSON and CSV)
         st.markdown("---")
